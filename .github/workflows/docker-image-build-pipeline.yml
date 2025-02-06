@@ -30,10 +30,10 @@ jobs:
       - name: Build Docker image with no cache
         run: |
           VERSION_TAG=${GITHUB_REF#refs/tags/}
-          docker build --no-cache -t ghcr.io/${{ github.repository }}/my-image:${VERSION_TAG} .
+          docker build --no-cache -t ghcr.io/${{ github.repository }}/html-nginx:${VERSION_TAG} .
 
       - name: Push Docker image to GHCR
         run: |
           VERSION_TAG=${GITHUB_REF#refs/tags/}
-          docker push ghcr.io/${{ github.repository }}/my-image:${VERSION_TAG}
+          docker push ghcr.io/${{ github.repository }}/html-nginx${VERSION_TAG}
 
