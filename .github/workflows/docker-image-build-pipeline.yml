@@ -9,6 +9,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/html-nginx
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,14 +29,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract version tag
+        run: echo "VERSION_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Build Docker image with no cache
         run: |
-          VERSION_TAG=${GITHUB_REF#refs/tags/}
-          docker build --no-cache -t ghcr.io/${{ github.repository }}/html-nginx:${VERSION_TAG} .
+          docker build --no-cache -t $IMAGE_NAME:$VERSION_TAG .
 
       - name: Push Docker image to GHCR
         run: |
-          VERSION_TAG=${GITHUB_REF#refs/tags/}
-          docker push ghcr.io/${{ github.repository }}/html-nginx:${VERSION_TAG}
+          docker push $IMAGE_NAME:$VERSION_TAG
 
