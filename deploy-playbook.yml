@@ -1,0 +1,114 @@
+- name: Rolling update with rollback on failure using kubernetes.core.k8s
+  hosts: localhost
+  gather_facts: no
+  vars:
+    new_image: "ghcr.io/k1s3n/infraflows/html-nginx:v1.0.1"
+
+  tasks:
+
+    - name: Fetch the current deployment details
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: nginx-deployment
+        namespace: default
+      register: current_deployment
+
+    - name: Store the current image for rollback
+      set_fact:
+        previous_image: "{{ current_deployment.resources[0].spec.template.spec.containers[0].image }}"
+
+    - name: Skip deployment if the new image is already running
+      debug:
+        msg: "Skipping update - Image {{ new_image }} is already deployed!"
+      when: previous_image == new_image
+
+    - name: Stop playbook execution if no update is needed
+      meta: end_play
+      when: previous_image == new_image
+
+
+    - name: Update deployment with the new image
+      kubernetes.core.k8s:
+        api_version: apps/v1
+        kind: Deployment
+        name: nginx-deployment
+        namespace: default
+        definition:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: html-nginx
+                    image: "{{ new_image }}"
+
+    - name: Wait for rollout to complete
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: nginx-deployment
+        namespace: default
+      register: rollout_status
+      until: 
+        - rollout_status.resources[0].status.conditions is defined
+        - rollout_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | list | length > 0
+        - rollout_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | map(attribute='status') | list | first == "True"
+      retries: 10
+      delay: 10
+
+    - name: Check pod statuses in case of failure
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: default
+        label_selectors:
+          - app=html-nginx
+      register: pod_status
+
+
+    - name: Fail if any pod is in an error state
+      fail:
+        msg: "Pod has entered an error state! Rolling back!"
+      when: >
+        pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0
+        or
+        pod_status.resources | selectattr('status.containerStatuses[0].state.waiting.reason', 'defined') | selectattr('status.containerStatuses[0].state.waiting.reason', 'in', ['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull']) | list | length > 0
+
+    - name: Fetch the updated image to verify deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: nginx-deployment
+        namespace: default
+      register: updated_deployment
+
+    - name: Validate new image is applied
+      set_fact:
+        updated_image: "{{ updated_deployment.resources[0].spec.template.spec.containers[0].image }}"
+
+    - name: Rollback to the previous image on failure
+      kubernetes.core.k8s:
+        api_version: apps/v1
+        kind: Deployment
+        name: nginx-deployment
+        namespace: default
+        definition:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: html-nginx
+                    image: "{{ previous_image }}"
+      when: updated_image != new_image or (pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0)
+
+    - name: Wait for rollback to complete
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: nginx-deployment
+        namespace: default
+      register: rollback_status
+      until: rollback_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | map(attribute='status') | list | first == "True"
+      retries: 10
+      delay: 10
+      when: updated_image != new_image or (pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0)
