@@ -2,8 +2,10 @@
   hosts: localhost
   gather_facts: no
   vars:
-    new_image: "ghcr.io/k1s3n/infraflows/html-nginx:v1.0.1"
-
+    registry: "ghcr.io/k1s3n/infraflows"
+    image_name: "html-nginx"
+    image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('v1.0.1', true) }}"  # Use an env variable if set
+    new_image: "{{ registry }}/{{ image_name }}:{{ image_tag }}"
   tasks:
 
     - name: Fetch the current deployment details
