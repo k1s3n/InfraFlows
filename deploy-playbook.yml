@@ -60,6 +60,8 @@
         - rollout_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | map(attribute='status') | list | first == "True"
       retries: 10
       delay: 10
+      failed_when: >
+        rollout_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Progressing') | map(attribute='reason') | list | first == "ProgressDeadlineExceeded"
 
     - name: Check pod statuses in case of failure
       kubernetes.core.k8s_info:
@@ -70,14 +72,14 @@
           - app=html-nginx
       register: pod_status
 
-
-    - name: Fail if any pod is in an error state
+    - name: Fail if any deployment or pod is in an error state
       fail:
-        msg: "Pod has entered an error state! Rolling back!"
+        msg: "Deployment failed! Rolling back"
       when: >
-        pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0
-        or
-        pod_status.resources | selectattr('status.containerStatuses[0].state.waiting.reason', 'defined') | selectattr('status.containerStatuses[0].state.waiting.reason', 'in', ['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull']) | list | length > 0
+        rollout_status.failed_when is defined and rollout_status.failed_when
+        or pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0
+        or pod_status.resources | selectattr('status.containerStatuses[0].state.waiting.reason', 'defined') 
+          | selectattr('status.containerStatuses[0].state.waiting.reason', 'in', ['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull']) | list | length > 0
 
     - name: Fetch the updated image to verify deployment
       kubernetes.core.k8s_info:
@@ -104,7 +106,10 @@
                 containers:
                   - name: html-nginx
                     image: "{{ previous_image }}"
-      when: updated_image != new_image or (pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0)
+      when: >
+        rollout_status.failed_when is defined and rollout_status.failed_when
+        or updated_image != new_image
+        or pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0
 
     - name: Wait for rollback to complete
       kubernetes.core.k8s_info:
@@ -116,4 +121,7 @@
       until: rollback_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | map(attribute='status') | list | first == "True"
       retries: 10
       delay: 10
-      when: updated_image != new_image or (pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0)
+      when: >
+        rollout_status.failed_when is defined and rollout_status.failed_when
+        or updated_image != new_image
+        or pod_status.resources | selectattr('status.phase', 'equalto', 'Failed') | list | length > 0
